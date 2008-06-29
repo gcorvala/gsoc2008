@@ -26,6 +26,7 @@
 
 #include <glib.h>
 #include <telepathy-glib/channel.h>
+#include <libstream-engine/channel.h>
 
 G_BEGIN_DECLS
 

@@ -7,6 +7,7 @@ AM_CPPFLAGS =                                           \
 	-DDATADIR=\""$(datadir)"\"              	\
 	$(PYTHON_BINDING_CFLAGS)			\
 	$(PYTHON_INCLUDES)				\
+  $(FARSIGHT2_CFLAGS) \
 	$(WARN_CFLAGS)
 
 BUILT_SOURCES = 					\
@@ -21,6 +22,7 @@ empathy_la_SOURCES =					\
 
 empathy_la_LIBADD =					\
 	$(PYTHON_BINDING_LIBS)				\
+	$(top_builddir)/libstream-engine/libstreamengine-convenience.la \
 	$(top_builddir)/libempathy/libempathy.la
 
 empathy_la_LDFLAGS =					\

@@ -4,6 +4,8 @@ AM_CPPFLAGS =                                           \
 	-I$(top_builddir)                               \
 	-DDATADIR=\""$(datadir)"\"              	\
 	$(LIBEMPATHY_CFLAGS)				\
+	$(FARSIGHT2_CFLAGS) \
+	$(TELEPATHY_CFLAGS) \
 	$(WARN_CFLAGS)
 
 BUILT_SOURCES = 					\
@@ -49,6 +51,8 @@ nodist_libempathy_la_SOURCES =\
 
 libempathy_la_LIBADD =		\
 	$(top_builddir)/extensions/libemp-extensions.la \
+	$(FARSIGHT2_LIBS) \
+	$(TELEPATHY_LIBS) \
 	$(LIBEMPATHY_LIBS)
 
 libempathy_la_LDFLAGS =		\

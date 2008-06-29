@@ -77,6 +77,29 @@ fi
 EMPATHY_ARG_VALGRIND
 
 # -----------------------------------------------------------
+# Libstream-engine
+# -----------------------------------------------------------
+dnl Check for Telepathy libraries
+PKG_CHECK_MODULES([TELEPATHY], [telepathy-glib >= 0.7.1])
+AC_SUBST(TELEPATHY_CFLAGS)
+AC_SUBST(TELEPATHY_LIBS)
+
+dnl Check for farsight
+PKG_CHECK_MODULES(FARSIGHT2, [farsight2-0.10])
+AC_SUBST(FARSIGHT2_CFLAGS)
+AC_SUBST(FARSIGHT2_LIBS)
+
+dnl Check for gst-plugins-base
+PKG_CHECK_MODULES(GST_PLUGINS_BASE, [gstreamer-plugins-base-0.10])
+AC_SUBST(GST_PLUGINS_BASE_CFLAGS)
+AC_SUBST(GST_PLUGINS_BASE_LIBS)
+
+dnl libx11
+PKG_CHECK_MODULES(X11, [x11 gtk+-2.0])
+AC_SUBST(X11_CFLAGS)
+AC_SUBST(X11_LIBS)
+
+# -----------------------------------------------------------
 # Pkg-Config dependency checks
 # -----------------------------------------------------------
 
@@ -293,6 +316,7 @@ AC_OUTPUT([
    libempathy/libempathy.pc
    libempathy-gtk/Makefile
    libempathy-gtk/libempathy-gtk.pc
+   libstream-engine/Makefile
    src/Makefile
    megaphone/Makefile
    megaphone/src/Makefile

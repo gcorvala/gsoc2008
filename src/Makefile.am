@@ -7,12 +7,17 @@ AM_CPPFLAGS =						\
 	-DLIBDIR=\""$(libdir)"\"			\
 	-DLOCALEDIR=\""$(datadir)/locale"\"		\
 	$(EMPATHY_CFLAGS)				\
+  $(FARSIGHT2_CFLAGS) \
+  $(TELEPATHY_CFLAGS) \
 	$(WARN_CFLAGS)
 
 LDADD =								\
 	$(top_builddir)/libempathy-gtk/libempathy-gtk.la	\
 	$(top_builddir)/libempathy/libempathy.la		\
 	$(top_builddir)/extensions/libemp-extensions.la		\
+	$(top_builddir)/libstream-engine/libstreamengine-convenience.la \
+  $(FARSIGHT2_LIBS) \
+  $(TELEPATHY_LIBS) \
 	$(EMPATHY_LIBS)
 
 bin_PROGRAMS =			\
