@@ -7,7 +7,9 @@ CLEANFILES = $(BUILT_SOURCES)
 #libexec_PROGRAMS = telepathy-stream-engine
 
 libstreamengine_convenience_la_SOURCES = \
-	channel.h \
+	util.h \
+	util.c \
+  channel.h \
 	channel.c \
 	session.h \
 	session.c \
@@ -15,8 +17,6 @@ libstreamengine_convenience_la_SOURCES = \
 	stream.c \
 	#tp-stream-engine.h \
 	#tp-stream-engine.c \
-	util.h \
-	util.c \
 	audiostream.c \
 	audiostream.h \
 	videostream.c \

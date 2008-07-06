@@ -13,6 +13,7 @@ AM_CPPFLAGS =						\
 
 LDADD =								\
 	$(top_builddir)/libempathy-gtk/libempathy-gtk.la	\
+	$(top_builddir)/libstream-engine/libstreamengine-convenience.la \
 	$(top_builddir)/libempathy/libempathy.la		\
 	$(EMPATHY_LIBS)
 

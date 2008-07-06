@@ -14,4 +14,5 @@ megaphone_applet_LDFLAGS = 					\
 
 megaphone_applet_LDADD = 					\
 	$(top_builddir)/libempathy/libempathy.la \
+	$(top_builddir)/libstream-engine/libstreamengine-convenience.la \
 	$(top_builddir)/libempathy-gtk/libempathy-gtk.la
