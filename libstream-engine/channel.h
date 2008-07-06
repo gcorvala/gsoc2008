@@ -2,9 +2,9 @@
 #define __TPMEDIA_CHANNEL_H__
 
 #include <glib-object.h>
+#include <telepathy-glib/channel.h>
 
 #include "stream.h"
-#include <telepathy-glib/channel.h>
 
 G_BEGIN_DECLS
 
