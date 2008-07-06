@@ -906,3 +906,11 @@ tpmedia_channel_bus_message (TpmediaChannel *channel,
 
   return ret;
 }
+
+TpChannel *
+tpmedia_get_channel (TpmediaChannel *channel)
+{
+  TpmediaChannelPrivate *priv = CHANNEL_PRIVATE (channel);
+  
+  return priv->channel_proxy;
+}

@@ -29,6 +29,10 @@
 
 #include <extensions/extensions.h>
 
+#include <libstream-engine/channel.h>
+#include <libstream-engine/session.h>
+#include <libstream-engine/stream.h>
+
 #include "empathy-tp-call.h"
 #include "empathy-contact-factory.h"
 #include "empathy-tp-group.h"
@@ -43,7 +47,8 @@
 #define GET_PRIV(obj) EMPATHY_GET_PRIV (obj, EmpathyTpCall)
 typedef struct
 {
-  TpChannel *channel;
+  //TpChannel *channel;
+  TpmediaChannel *channel;
   TpProxy *stream_engine;
   TpDBusDaemon *dbus_daemon;
   EmpathyTpGroup *group;
@@ -256,7 +261,8 @@ tp_call_request_streams_for_capabilities (EmpathyTpCall *call,
       g_array_append_val (stream_types, stream_type);
     }
 
-  tp_cli_channel_type_streamed_media_call_request_streams (priv->channel, -1,
+  tp_cli_channel_type_streamed_media_call_request_streams (
+      tpmedia_get_channel (priv->channel), -1,
       handle, stream_types, tp_call_request_streams_cb, NULL, NULL,
       G_OBJECT (call));
 
@@ -356,7 +362,7 @@ tp_call_close_channel (EmpathyTpCall *call)
 
   DEBUG ("Closing channel");
 
-  tp_cli_channel_call_close (priv->channel, -1,
+  tp_cli_channel_call_close (tpmedia_get_channel (priv->channel), -1,
       NULL, NULL, NULL, NULL);
 
   priv->status = EMPATHY_TP_CALL_STATUS_CLOSED;
@@ -468,19 +474,19 @@ tp_call_constructor (GType type,
   /* Setup streamed media channel */
   g_signal_connect (priv->channel, "invalidated",
       G_CALLBACK (tp_call_channel_invalidated_cb), call);
-  tp_cli_channel_type_streamed_media_connect_to_stream_added (priv->channel,
+  tp_cli_channel_type_streamed_media_connect_to_stream_added (tpmedia_get_channel (priv->channel),
       tp_call_stream_added_cb, NULL, NULL, G_OBJECT (call), NULL);
-  tp_cli_channel_type_streamed_media_connect_to_stream_removed (priv->channel,
+  tp_cli_channel_type_streamed_media_connect_to_stream_removed (tpmedia_get_channel (priv->channel),
       tp_call_stream_removed_cb, NULL, NULL, G_OBJECT (call), NULL);
-  tp_cli_channel_type_streamed_media_connect_to_stream_state_changed (priv->channel,
+  tp_cli_channel_type_streamed_media_connect_to_stream_state_changed (tpmedia_get_channel (priv->channel),
       tp_call_stream_state_changed_cb, NULL, NULL, G_OBJECT (call), NULL);
-  tp_cli_channel_type_streamed_media_connect_to_stream_direction_changed (priv->channel,
+  tp_cli_channel_type_streamed_media_connect_to_stream_direction_changed (tpmedia_get_channel (priv->channel),
       tp_call_stream_direction_changed_cb, NULL, NULL, G_OBJECT (call), NULL);
-  tp_cli_channel_type_streamed_media_call_list_streams (priv->channel, -1,
+  tp_cli_channel_type_streamed_media_call_list_streams (tpmedia_get_channel (priv->channel), -1,
       tp_call_request_streams_cb, NULL, NULL, G_OBJECT (call));
 
   /* Setup group interface */
-  priv->group = empathy_tp_group_new (priv->channel);
+  priv->group = empathy_tp_group_new (tpmedia_get_channel (priv->channel));
 
   g_signal_connect (priv->group, "member-added",
       G_CALLBACK (tp_call_member_added_cb), call);
@@ -644,13 +650,28 @@ empathy_tp_call_init (EmpathyTpCall *call)
   priv->video->exists = FALSE;
 }
 
+//EmpathyTpCall *
+//empathy_tp_call_new (TpChannel *channel)
+//{
+  //g_return_val_if_fail (TP_IS_CHANNEL (channel), NULL);
+
+  //return g_object_new (EMPATHY_TYPE_TP_CALL,
+      //"channel", channel,
+      //NULL);
+//}
+
 EmpathyTpCall *
 empathy_tp_call_new (TpChannel *channel)
 {
+  TpmediaChannel *channel_tmp;
+  
   g_return_val_if_fail (TP_IS_CHANNEL (channel), NULL);
-
+  
+  channel_tmp = g_object_new (TPMEDIA_TYPE_CHANNEL,
+      "channel_proxy", channel,
+      NULL);
   return g_object_new (EMPATHY_TYPE_TP_CALL,
-      "channel", channel,
+      "channel", channel_tmp,
       NULL);
 }
 
@@ -695,7 +716,7 @@ empathy_tp_call_request_video_stream_direction (EmpathyTpCall *call,
   else
       new_direction = priv->video->direction & ~TP_MEDIA_STREAM_DIRECTION_SEND;
 
-  tp_cli_channel_type_streamed_media_call_request_stream_direction (priv->channel,
+  tp_cli_channel_type_streamed_media_call_request_stream_direction (tpmedia_get_channel (priv->channel),
       -1, priv->video->id, new_direction,
       (tp_cli_channel_type_streamed_media_callback_for_request_stream_direction)
       tp_call_async_cb, NULL, NULL, G_OBJECT (call));
@@ -819,7 +840,7 @@ empathy_tp_call_start_tone (EmpathyTpCall *call, TpDTMFEvent event)
   if (!priv->audio->exists)
       return;
 
-  tp_cli_channel_interface_dtmf_call_start_tone (priv->channel, -1,
+  tp_cli_channel_interface_dtmf_call_start_tone (tpmedia_get_channel (priv->channel), -1,
       priv->audio->id, event,
       (tp_cli_channel_interface_dtmf_callback_for_start_tone) tp_call_async_cb,
       "starting tone", NULL, G_OBJECT (call));
@@ -836,7 +857,7 @@ empathy_tp_call_stop_tone (EmpathyTpCall *call)
   if (!priv->audio->exists)
       return;
 
-  tp_cli_channel_interface_dtmf_call_stop_tone (priv->channel, -1,
+  tp_cli_channel_interface_dtmf_call_stop_tone (tpmedia_get_channel (priv->channel), -1,
       priv->audio->id,
       (tp_cli_channel_interface_dtmf_callback_for_stop_tone) tp_call_async_cb,
       "stoping tone", NULL, G_OBJECT (call));
