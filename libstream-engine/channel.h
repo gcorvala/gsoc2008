@@ -2,7 +2,6 @@
 #define __TPMEDIA_CHANNEL_H__
 
 #include <glib-object.h>
-#include <telepathy-glib/channel.h>
 
 #include "stream.h"
 
@@ -69,8 +68,6 @@ void tpmedia_channel_foreach_stream (
 
 gboolean tpmedia_channel_bus_message (TpmediaChannel *channel,
     GstMessage *message);
-
-TpChannel *tpmedia_get_channel (TpmediaChannel *channel);
 
 G_END_DECLS
 
