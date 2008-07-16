@@ -379,85 +379,30 @@ tp_call_close_channel (EmpathyTpCall *call)
   g_object_notify (G_OBJECT (call), "status");
 }
 
-//static void
-//tp_call_stream_engine_invalidated_cb (TpProxy       *stream_engine,
-				      //GQuark         domain,
-				      //gint           code,
-				      //gchar         *message,
-				      //EmpathyTpCall *call)
-//{
-  //DEBUG ("Stream engine proxy invalidated: %s", message);
-  //tp_call_close_channel (call);
-//}
+static void
+tp_call_stream_engine_handle_channel (EmpathyTpCall *call)
+{
+  EmpathyTpCallPriv *priv = GET_PRIV (call);
+  gchar *channel_type;
+  gchar *object_path;
+  guint handle_type;
+  guint handle;
+  TpProxy *connection;
+  TpChannel *channel;
 
-//static void
-//tp_call_stream_engine_watch_name_owner_cb (TpDBusDaemon *daemon,
-					   //const gchar *name,
-					   //const gchar *new_owner,
-					   //gpointer call)
-//{
-  //EmpathyTpCallPriv *priv = GET_PRIV (call);
+  DEBUG ("Revving up the stream engine");
 
-  ///* G_STR_EMPTY(new_owner) means either stream-engine has not started yet or
-   //* has crashed. We want to close the channel if stream-engine has crashed.
-   //* */
-  //DEBUG ("Watch SE: name='%s' SE running='%s' new_owner='%s'",
-      //name, priv->stream_engine_running ? "yes" : "no",
-      //new_owner ? new_owner : "none");
-  //if (priv->stream_engine_running && G_STR_EMPTY (new_owner))
-    //{
-      //DEBUG ("Stream engine falled off the bus");
-      //tp_call_close_channel (call);
-      //return;
-    //}
-
-  //priv->stream_engine_running = !G_STR_EMPTY (new_owner);
-//}
-
-//static void
-//tp_call_stream_engine_handle_channel (EmpathyTpCall *call)
-//{
-  //EmpathyTpCallPriv *priv = GET_PRIV (call);
-  //gchar *channel_type;
-  //gchar *object_path;
-  //guint handle_type;
-  //guint handle;
-  //TpProxy *connection;
-  //TpChannel *channel;
-
-  //DEBUG ("Revving up the stream engine");
-
-  //g_object_get (priv->media_channel,
-      //"channel", &channel,
-      //NULL);
-
-  //priv->stream_engine = g_object_new (TP_TYPE_PROXY,
-      //"bus-name", STREAM_ENGINE_BUS_NAME,
-      //"dbus-connection", tp_get_bus (),
-      //"object-path", STREAM_ENGINE_OBJECT_PATH,
-       //NULL);
-  //tp_proxy_add_interface_by_id (priv->stream_engine,
-      //EMP_IFACE_QUARK_STREAM_ENGINE);
-  //tp_proxy_add_interface_by_id (priv->stream_engine,
-      //EMP_IFACE_QUARK_CHANNEL_HANDLER);
-
-  //g_signal_connect (priv->stream_engine, "invalidated",
-      //G_CALLBACK (tp_call_stream_engine_invalidated_cb),
-      //call);
+  g_object_get (priv->media_channel,
+      "channel", &channel,
+      NULL);
   
-  ///* FIXME: dbus daemon should be unique */
-  //priv->dbus_daemon = tp_dbus_daemon_new (tp_get_bus ());
-  //tp_dbus_daemon_watch_name_owner (priv->dbus_daemon, STREAM_ENGINE_BUS_NAME,
-      //tp_call_stream_engine_watch_name_owner_cb,
-      //call, NULL);
-
-  //g_object_get (channel,
-      //"connection", &connection,
-      //"channel-type", &channel_type,
-      //"object-path", &object_path,
-      //"handle_type", &handle_type,
-      //"handle", &handle,
-      //NULL);
+  g_object_get (channel,
+      "connection", &connection,
+      "channel-type", &channel_type,
+      "object-path", &object_path,
+      "handle_type", &handle_type,
+      "handle", &handle,
+      NULL);
 
   //emp_cli_channel_handler_call_handle_channel (priv->stream_engine, -1,
         //connection->bus_name,
@@ -466,12 +411,53 @@ tp_call_close_channel (EmpathyTpCall *call)
         //tp_call_async_cb, "calling handle channel", NULL,
         //G_OBJECT (call));
 
-  
+  g_debug ("start integration handle_channel");
 
-  //g_object_unref (connection);
-  //g_free (channel_type);
-  //g_free (object_path);
-//}
+  if (strcmp (channel_type, TP_IFACE_CHANNEL_TYPE_STREAMED_MEDIA) != 0)
+    {
+      GError e = { TP_ERRORS, TP_ERROR_INVALID_ARGUMENT,
+        "Stream Engine was passed a channel that was not a "
+        TP_IFACE_CHANNEL_TYPE_STREAMED_MEDIA };
+
+      g_message ("%s", e.message);
+      return;
+     }
+
+  if (priv->media_channel == NULL)
+    {
+      g_debug ("media_channel == NULL");
+      return;
+    }
+
+  //g_signal_connect (priv->media_channel,
+      //"handler-result",
+      //G_CALLBACK (handler_result),
+      //context);
+  //g_signal_connect (priv->media_channel,
+      //"closed",
+      //G_CALLBACK (channel_closed),
+      //self);
+  //g_signal_connect (priv->media_channel,
+      //"session-created",
+      //G_CALLBACK (channel_session_created),
+      //self);
+  //g_signal_connect (priv->media_channel,
+      //"stream-created",
+      //G_CALLBACK (channel_stream_created),
+      //self);
+  //g_signal_connect (priv->media_channel,
+      //"stream-get-codec-config",
+      //G_CALLBACK (stream_get_codec_config),
+      //self);
+
+  //g_signal_emit (self, signals[HANDLING_CHANNEL], 0);
+
+  g_debug ("stop integration handle_channel");
+
+  g_object_unref (connection);
+  g_free (channel_type);
+  g_free (object_path);
+}
 
 static GObject *
 tp_call_constructor (GType type,
@@ -516,7 +502,7 @@ tp_call_constructor (GType type,
       G_CALLBACK (tp_call_remote_pending_cb), call);
 
   /* Start stream engine */
-  //tp_call_stream_engine_handle_channel (call);
+  tp_call_stream_engine_handle_channel (call);
 
   return object;
 }
