@@ -1,5 +1,4 @@
-SUBDIRS = tools extensions po data libstream-engine libempathy \
-	libempathy-gtk src docs help
+SUBDIRS = tools extensions po data libempathy libempathy-gtk src docs help
 
 if HAVE_MEGAPHONE
 SUBDIRS += megaphone
