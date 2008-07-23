@@ -87,6 +87,7 @@ PKG_CHECK_MODULES(LIBEMPATHY,
    libxml-2.0
    telepathy-glib >= $TELEPATHY_GLIB_REQUIRED
    libmissioncontrol >= $MISSION_CONTROL_REQUIRED
+   telepathy-farsight
 ])
 
 PKG_CHECK_MODULES(EMPATHY,

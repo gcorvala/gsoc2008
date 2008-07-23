@@ -29,6 +29,8 @@
 
 #include <extensions/extensions.h>
 
+#include <telepathy-farsight/channel.h>
+
 #include "empathy-tp-call.h"
 #include "empathy-contact-factory.h"
 #include "empathy-tp-group.h"
@@ -43,7 +45,7 @@
 #define GET_PRIV(obj) EMPATHY_GET_PRIV (obj, EmpathyTpCall)
 typedef struct
 {
-  TpChannel *channel;
+  TfChannel *channel;
   TpProxy *stream_engine;
   TpDBusDaemon *dbus_daemon;
   EmpathyTpGroup *group;
@@ -232,9 +234,14 @@ tp_call_request_streams_for_capabilities (EmpathyTpCall *call,
                                           EmpathyCapabilities capabilities)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+  TpChannel *chan;
   GArray *stream_types;
   guint handle;
   guint stream_type;
+
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
 
   if (capabilities == EMPATHY_CAPABILITIES_UNKNOWN)
       capabilities = EMPATHY_CAPABILITIES_AUDIO | EMPATHY_CAPABILITIES_VIDEO;
@@ -256,7 +263,7 @@ tp_call_request_streams_for_capabilities (EmpathyTpCall *call,
       g_array_append_val (stream_types, stream_type);
     }
 
-  tp_cli_channel_type_streamed_media_call_request_streams (priv->channel, -1,
+  tp_cli_channel_type_streamed_media_call_request_streams (chan, -1,
       handle, stream_types, tp_call_request_streams_cb, NULL, NULL,
       G_OBJECT (call));
 
@@ -350,13 +357,18 @@ static void
 tp_call_close_channel (EmpathyTpCall *call)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+  TpChannel *chan;
 
   if (priv->status == EMPATHY_TP_CALL_STATUS_CLOSED)
       return;
 
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
   DEBUG ("Closing channel");
 
-  tp_cli_channel_call_close (priv->channel, -1,
+  tp_cli_channel_call_close (chan, -1,
       NULL, NULL, NULL, NULL);
 
   priv->status = EMPATHY_TP_CALL_STATUS_CLOSED;
@@ -402,6 +414,7 @@ static void
 tp_call_stream_engine_handle_channel (EmpathyTpCall *call)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+  TpChannel *chan;
   gchar *channel_type;
   gchar *object_path;
   guint handle_type;
@@ -431,6 +444,10 @@ tp_call_stream_engine_handle_channel (EmpathyTpCall *call)
       call, NULL);
 
   g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
+  g_object_get (chan,
       "connection", &connection,
       "channel-type", &channel_type,
       "object-path", &object_path,
@@ -458,6 +475,7 @@ tp_call_constructor (GType type,
   GObject *object;
   EmpathyTpCall *call;
   EmpathyTpCallPriv *priv;
+  TpChannel *chan;
 
   object = G_OBJECT_CLASS (empathy_tp_call_parent_class)->constructor (type,
       n_construct_params, construct_params);
@@ -465,22 +483,26 @@ tp_call_constructor (GType type,
   call = EMPATHY_TP_CALL (object);
   priv = GET_PRIV (call);
 
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
   /* Setup streamed media channel */
-  g_signal_connect (priv->channel, "invalidated",
+  g_signal_connect (chan, "invalidated",
       G_CALLBACK (tp_call_channel_invalidated_cb), call);
-  tp_cli_channel_type_streamed_media_connect_to_stream_added (priv->channel,
+  tp_cli_channel_type_streamed_media_connect_to_stream_added (chan,
       tp_call_stream_added_cb, NULL, NULL, G_OBJECT (call), NULL);
-  tp_cli_channel_type_streamed_media_connect_to_stream_removed (priv->channel,
+  tp_cli_channel_type_streamed_media_connect_to_stream_removed (chan,
       tp_call_stream_removed_cb, NULL, NULL, G_OBJECT (call), NULL);
-  tp_cli_channel_type_streamed_media_connect_to_stream_state_changed (priv->channel,
+  tp_cli_channel_type_streamed_media_connect_to_stream_state_changed (chan,
       tp_call_stream_state_changed_cb, NULL, NULL, G_OBJECT (call), NULL);
-  tp_cli_channel_type_streamed_media_connect_to_stream_direction_changed (priv->channel,
+  tp_cli_channel_type_streamed_media_connect_to_stream_direction_changed (chan,
       tp_call_stream_direction_changed_cb, NULL, NULL, G_OBJECT (call), NULL);
-  tp_cli_channel_type_streamed_media_call_list_streams (priv->channel, -1,
+  tp_cli_channel_type_streamed_media_call_list_streams (chan, -1,
       tp_call_request_streams_cb, NULL, NULL, G_OBJECT (call));
 
   /* Setup group interface */
-  priv->group = empathy_tp_group_new (priv->channel);
+  priv->group = empathy_tp_group_new (chan);
 
   g_signal_connect (priv->group, "member-added",
       G_CALLBACK (tp_call_member_added_cb), call);
@@ -497,6 +519,7 @@ static void
 tp_call_finalize (GObject *object)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (object);
+  TpChannel *chan;
 
   DEBUG ("Finalizing: %p", object);
 
@@ -504,12 +527,16 @@ tp_call_finalize (GObject *object)
   g_slice_free (EmpathyTpCallStream, priv->video);
   g_object_unref (priv->group);
 
-  if (priv->channel != NULL)
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
+  if (chan != NULL)
     {
-      g_signal_handlers_disconnect_by_func (priv->channel,
+      g_signal_handlers_disconnect_by_func (chan,
           tp_call_channel_invalidated_cb, object);
       tp_call_close_channel (EMPATHY_TP_CALL (object));
-      g_object_unref (priv->channel);
+      g_object_unref (chan);
     }
 
   if (priv->stream_engine != NULL)
@@ -603,7 +630,7 @@ empathy_tp_call_class_init (EmpathyTpCallClass *klass)
 
   g_object_class_install_property (object_class, PROP_CHANNEL,
       g_param_spec_object ("channel", "channel", "channel",
-      TP_TYPE_CHANNEL,
+      TF_TYPE_CHANNEL,
       G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE |
       G_PARAM_STATIC_NICK | G_PARAM_STATIC_BLURB));
   g_object_class_install_property (object_class, PROP_CONTACT,
@@ -647,10 +674,14 @@ empathy_tp_call_init (EmpathyTpCall *call)
 EmpathyTpCall *
 empathy_tp_call_new (TpChannel *channel)
 {
+  TfChannel *chan;
+  
   g_return_val_if_fail (TP_IS_CHANNEL (channel), NULL);
+  
+  chan = tf_channel_new_from_proxy (channel);
 
   return g_object_new (EMPATHY_TYPE_TP_CALL,
-      "channel", channel,
+      "channel", chan,
       NULL);
 }
 
@@ -675,6 +706,7 @@ empathy_tp_call_request_video_stream_direction (EmpathyTpCall *call,
                                                 gboolean is_sending)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+  TpChannel *chan;
   guint new_direction;
 
   g_return_if_fail (EMPATHY_IS_TP_CALL (call));
@@ -695,7 +727,11 @@ empathy_tp_call_request_video_stream_direction (EmpathyTpCall *call,
   else
       new_direction = priv->video->direction & ~TP_MEDIA_STREAM_DIRECTION_SEND;
 
-  tp_cli_channel_type_streamed_media_call_request_stream_direction (priv->channel,
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
+  tp_cli_channel_type_streamed_media_call_request_stream_direction (chan,
       -1, priv->video->id, new_direction,
       (tp_cli_channel_type_streamed_media_callback_for_request_stream_direction)
       tp_call_async_cb, NULL, NULL, G_OBJECT (call));
@@ -740,13 +776,18 @@ empathy_tp_call_add_output_video (EmpathyTpCall *call,
                                   guint output_video_socket_id)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+  TpChannel *chan;
 
   g_return_if_fail (EMPATHY_IS_TP_CALL (call));
 
   DEBUG ("Adding output video - socket: %d", output_video_socket_id);
 
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
   emp_cli_stream_engine_call_set_output_window (priv->stream_engine, -1,
-      TP_PROXY (priv->channel)->object_path,
+      TP_PROXY (chan)->object_path,
       priv->video->id, output_video_socket_id,
       tp_call_async_cb,
       "setting output window", NULL,
@@ -758,14 +799,19 @@ empathy_tp_call_set_output_volume (EmpathyTpCall *call,
                                    guint volume)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+  TpChannel *chan;
 
   g_return_if_fail (EMPATHY_IS_TP_CALL (call));
   g_return_if_fail (priv->status != EMPATHY_TP_CALL_STATUS_CLOSED);
 
   DEBUG ("Setting output volume: %d", volume);
 
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
   emp_cli_stream_engine_call_set_output_volume (priv->stream_engine, -1,
-      TP_PROXY (priv->channel)->object_path,
+      TP_PROXY (chan)->object_path,
       priv->audio->id, volume,
       tp_call_async_cb,
       "setting output volume", NULL,
@@ -777,13 +823,18 @@ empathy_tp_call_mute_output (EmpathyTpCall *call,
                              gboolean is_muted)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+  TpChannel *chan;
 
   g_return_if_fail (EMPATHY_IS_TP_CALL (call));
 
   DEBUG ("Setting output mute: %d", is_muted);
 
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
   emp_cli_stream_engine_call_mute_output (priv->stream_engine, -1,
-      TP_PROXY (priv->channel)->object_path,
+      TP_PROXY (chan)->object_path,
       priv->audio->id, is_muted,
       tp_call_async_cb,
       "muting output", NULL,
@@ -795,13 +846,18 @@ empathy_tp_call_mute_input (EmpathyTpCall *call,
                             gboolean is_muted)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+  TpChannel *chan;
 
   g_return_if_fail (EMPATHY_IS_TP_CALL (call));
 
   DEBUG ("Setting input mute: %d", is_muted);
 
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
   emp_cli_stream_engine_call_mute_input (priv->stream_engine, -1,
-      TP_PROXY (priv->channel)->object_path,
+      TP_PROXY (chan)->object_path,
       priv->audio->id, is_muted,
       tp_call_async_cb,
       "muting input", NULL,
@@ -812,6 +868,7 @@ void
 empathy_tp_call_start_tone (EmpathyTpCall *call, TpDTMFEvent event)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+  TpChannel *chan;
 
   g_return_if_fail (EMPATHY_IS_TP_CALL (call));
   g_return_if_fail (priv->status == EMPATHY_TP_CALL_STATUS_ACCEPTED);
@@ -819,7 +876,11 @@ empathy_tp_call_start_tone (EmpathyTpCall *call, TpDTMFEvent event)
   if (!priv->audio->exists)
       return;
 
-  tp_cli_channel_interface_dtmf_call_start_tone (priv->channel, -1,
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
+  tp_cli_channel_interface_dtmf_call_start_tone (chan, -1,
       priv->audio->id, event,
       (tp_cli_channel_interface_dtmf_callback_for_start_tone) tp_call_async_cb,
       "starting tone", NULL, G_OBJECT (call));
@@ -829,6 +890,7 @@ void
 empathy_tp_call_stop_tone (EmpathyTpCall *call)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+  TpChannel *chan;
 
   g_return_if_fail (EMPATHY_IS_TP_CALL (call));
   g_return_if_fail (priv->status == EMPATHY_TP_CALL_STATUS_ACCEPTED);
@@ -836,7 +898,11 @@ empathy_tp_call_stop_tone (EmpathyTpCall *call)
   if (!priv->audio->exists)
       return;
 
-  tp_cli_channel_interface_dtmf_call_stop_tone (priv->channel, -1,
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
+  tp_cli_channel_interface_dtmf_call_stop_tone (chan, -1,
       priv->audio->id,
       (tp_cli_channel_interface_dtmf_callback_for_stop_tone) tp_call_async_cb,
       "stoping tone", NULL, G_OBJECT (call));
@@ -846,10 +912,15 @@ gboolean
 empathy_tp_call_has_dtmf (EmpathyTpCall *call)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+  TpChannel *chan;
 
   g_return_val_if_fail (EMPATHY_IS_TP_CALL (call), FALSE);
 
-  return tp_proxy_has_interface_by_id (priv->channel,
+  g_object_get (priv->channel,
+      "channel", &chan,
+      NULL);
+
+  return tp_proxy_has_interface_by_id (chan,
       TP_IFACE_QUARK_CHANNEL_INTERFACE_DTMF);
 }
 
