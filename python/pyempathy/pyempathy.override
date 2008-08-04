@@ -20,7 +20,6 @@ headers
 #include "empathy-message.h"
 #include "empathy-status-presets.h"
 #include "empathy-time.h"
-#include "empathy-tp-call.h"
 #include "empathy-tp-chat.h"
 #include "empathy-tp-contact-factory.h"
 #include "empathy-tp-contact-list.h"

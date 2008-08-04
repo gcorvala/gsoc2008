@@ -31,14 +31,15 @@
 
 #include <telepathy-farsight/channel.h>
 
+#include <libempathy/empathy-contact-factory.h>
+#include <libempathy/empathy-tp-group.h>
+#include <libempathy/empathy-utils.h>
+
 #include "empathy-tp-call.h"
-#include "empathy-contact-factory.h"
-#include "empathy-tp-group.h"
-#include "empathy-utils.h"
 #include "empathy-tp-audio-stream.h"
 
 #define DEBUG_FLAG EMPATHY_DEBUG_TP
-#include "empathy-debug.h"
+#include <libempathy/empathy-debug.h>
 
 #define STREAM_ENGINE_BUS_NAME "org.freedesktop.Telepathy.StreamEngine"
 #define STREAM_ENGINE_OBJECT_PATH "/org/freedesktop/Telepathy/StreamEngine"

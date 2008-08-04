@@ -4,7 +4,6 @@ AM_CPPFLAGS =                                           \
 	-I$(top_builddir)                               \
 	-DDATADIR=\""$(datadir)"\"              	\
 	$(LIBEMPATHY_CFLAGS)				\
-	$(GTK_CFLAGS) \
 	$(WARN_CFLAGS)
 
 BUILT_SOURCES = 					\
@@ -29,15 +28,11 @@ libempathy_la_SOURCES =					\
 	empathy-contact-list.c				\
 	empathy-contact-manager.c			\
 	empathy-contact-factory.c			\
-	empathy-tp-audio-stream.c \
-	empathy-tp-video-sink.c \
-	empathy-tp-video-stream.c \
 	empathy-tp-contact-factory.c			\
 	empathy-tp-group.c				\
 	empathy-tp-contact-list.c			\
 	empathy-tp-chat.c				\
 	empathy-tp-roomlist.c				\
-	empathy-tp-call.c				\
 	empathy-tp-tube.c				\
 	empathy-idle.c					\
 	empathy-log-manager.c				\
@@ -53,7 +48,6 @@ nodist_libempathy_la_SOURCES =\
 
 libempathy_la_LIBADD =		\
 	$(top_builddir)/extensions/libemp-extensions.la \
-	$(GTK_LIBS) \
 	$(LIBEMPATHY_LIBS)
 
 libempathy_la_LDFLAGS =		\
@@ -73,15 +67,11 @@ libempathy_headers =				\
 	empathy-contact-list.h			\
 	empathy-contact-manager.h		\
 	empathy-contact-factory.h		\
-	empathy-tp-audio-stream.h \
-	empathy-tp-video-sink.h \
-	empathy-tp-video-stream.h \
 	empathy-tp-contact-factory.h		\
 	empathy-tp-group.h			\
 	empathy-tp-contact-list.h		\
 	empathy-tp-chat.h			\
 	empathy-tp-roomlist.h			\
-	empathy-tp-call.h			\
 	empathy-tp-tube.h			\
 	empathy-idle.h				\
 	empathy-log-manager.h			\

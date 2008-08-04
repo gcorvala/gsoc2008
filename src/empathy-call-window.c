@@ -29,11 +29,11 @@
 #include <telepathy-glib/enums.h>
 
 #include <libempathy/empathy-contact.h>
-#include <libempathy/empathy-tp-call.h>
 #include <libempathy/empathy-utils.h>
 #include <libempathy-gtk/empathy-ui-utils.h>
 
 #include "empathy-call-window.h"
+#include "empathy-tp-call.h"
 
 #define DEBUG_FLAG EMPATHY_DEBUG_OTHER
 #include <libempathy/empathy-debug.h>

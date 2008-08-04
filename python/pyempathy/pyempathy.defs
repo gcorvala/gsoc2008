@@ -91,13 +91,6 @@
   (gtype-id "EMPATHY_TYPE_MESSAGE")
 )
 
-(define-object TpCall
-  (in-module "Empathy")
-  (parent "GObject")
-  (c-name "EmpathyTpCall")
-  (gtype-id "EMPATHY_TYPE_TP_CALL")
-)
-
 (define-object TpChat
   (in-module "Empathy")
   (parent "GObject")
@@ -201,18 +194,6 @@
     '("handle" "EMPATHY_CONTACT_READY_HANDLE")
     '("name" "EMPATHY_CONTACT_READY_NAME")
     '("all" "EMPATHY_CONTACT_READY_ALL")
-  )
-)
-
-(define-enum TpCallStatus
-  (in-module "Empathy")
-  (c-name "EmpathyTpCallStatus")
-  (gtype-id "EMPATHY_TYPE_TP_CALL_STATUS")
-  (values
-    '("readying" "EMPATHY_TP_CALL_STATUS_READYING")
-    '("pending" "EMPATHY_TP_CALL_STATUS_PENDING")
-    '("accepted" "EMPATHY_TP_CALL_STATUS_ACCEPTED")
-    '("closed" "EMPATHY_TP_CALL_STATUS_CLOSED")
   )
 )
 
@@ -1707,109 +1688,6 @@
   (c-name "empathy_tp_roomlist_stop")
   (return-type "none")
 )
-
-
-
-;; From empathy-tp-call.h
-
-(define-function tp_call_get_type
-  (c-name "empathy_tp_call_get_type")
-  (return-type "GType")
-)
-
-(define-function tp_call_new
-  (c-name "empathy_tp_call_new")
-  (is-constructor-of "EmpathyTpCall")
-  (return-type "EmpathyTpCall*")
-  (parameters
-    '("TpChannel*" "channel")
-  )
-)
-
-(define-method accept_incoming_call
-  (of-object "EmpathyTpCall")
-  (c-name "empathy_tp_call_accept_incoming_call")
-  (return-type "none")
-)
-
-(define-method request_video_stream_direction
-  (of-object "EmpathyTpCall")
-  (c-name "empathy_tp_call_request_video_stream_direction")
-  (return-type "none")
-  (parameters
-    '("gboolean" "is_sending")
-  )
-)
-
-(define-method add_preview_video
-  (of-object "EmpathyTpCall")
-  (c-name "empathy_tp_call_add_preview_video")
-  (return-type "none")
-  (parameters
-    '("guint" "preview_video_socket_id")
-  )
-)
-
-(define-method remove_preview_video
-  (of-object "EmpathyTpCall")
-  (c-name "empathy_tp_call_remove_preview_video")
-  (return-type "none")
-  (parameters
-    '("guint" "preview_video_socket_id")
-  )
-)
-
-(define-method add_output_video
-  (of-object "EmpathyTpCall")
-  (c-name "empathy_tp_call_add_output_video")
-  (return-type "none")
-  (parameters
-    '("guint" "output_video_socket_id")
-  )
-)
-
-(define-method set_output_volume
-  (of-object "EmpathyTpCall")
-  (c-name "empathy_tp_call_set_output_volume")
-  (return-type "none")
-  (parameters
-    '("guint" "volume")
-  )
-)
-
-(define-method mute_output
-  (of-object "EmpathyTpCall")
-  (c-name "empathy_tp_call_mute_output")
-  (return-type "none")
-  (parameters
-    '("gboolean" "is_muted")
-  )
-)
-
-(define-method mute_input
-  (of-object "EmpathyTpCall")
-  (c-name "empathy_tp_call_mute_input")
-  (return-type "none")
-  (parameters
-    '("gboolean" "is_muted")
-  )
-)
-
-(define-method start_tone
-  (of-object "EmpathyTpCall")
-  (c-name "empathy_tp_call_start_tone")
-  (return-type "none")
-  (parameters
-    '("TpDTMFEvent" "event")
-  )
-)
-
-(define-method stop_tone
-  (of-object "EmpathyTpCall")
-  (c-name "empathy_tp_call_stop_tone")
-  (return-type "none")
-)
-
 
 
 ;; From empathy-tp-tube.h
