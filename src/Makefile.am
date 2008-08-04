@@ -15,6 +15,7 @@ LDADD =								\
 	$(top_builddir)/libempathy/libempathy.la		\
 	$(top_builddir)/extensions/libemp-extensions.la		\
 	$(EMPATHY_LIBS) \
+	$(GST_INTERFACES_LIBS) \
 	$(LIBEMPATHY_LIBS)
 
 bin_PROGRAMS =			\
@@ -35,7 +36,9 @@ test_SOURCES = \
 	empathy-call-window.c empathy-call-window.h			\
 	ephy-spinner.c ephy-spinner.h \
 	empathy-tp-call.c empathy-tp-call.h \
-	empathy-tp-audio-stream.c empathy-tp-audio-stream.h
+	empathy-tp-audio-stream.c empathy-tp-audio-stream.h \
+	empathy-tp-video-sink.c empathy-tp-video-sink.h \
+	empathy-tp-video-stream.c empathy-tp-video-stream.h
 
 empathy_SOURCES =							\
 	$(test_SOURCES) \

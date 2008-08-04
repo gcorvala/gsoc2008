@@ -37,6 +37,7 @@
 
 #include "empathy-tp-call.h"
 #include "empathy-tp-audio-stream.h"
+#include "empathy-tp-video-stream.h"
 
 #define DEBUG_FLAG EMPATHY_DEBUG_TP
 #include <libempathy/empathy-debug.h>
@@ -65,6 +66,10 @@ typedef struct
   GstElement *audioadder;
   
   gint audio_sink_use_count;
+
+  GstElement *videotee;
+
+  GList *output_sinks;
 
   EmpathyTpCallStream *audio;
   EmpathyTpCallStream *video;
@@ -720,6 +725,36 @@ tp_call_audio_stream_release_pad (EmpathyTpAudioStream *audiostream,
 }
 
 static void
+tp_call_stream_receiving (EmpathyTpVideoStream *videostream,
+    EmpathyTpCall *call)
+{
+  TfStream *stream = NULL;
+  TfChannel *chan = NULL;
+  guint stream_id;
+  gchar *channel_path;
+
+  g_object_get (videostream,
+      "stream", &stream,
+      NULL);
+
+  g_object_get (stream,
+      "channel", &chan,
+      "stream-id", &stream_id,
+      NULL);
+
+  g_object_get (chan,
+      "object-path", &channel_path,
+      NULL);
+
+  //stream_engine_svc_stream_engine_emit_receiving (call,
+      //channel_path, stream_id, TRUE);
+
+  g_object_unref (chan);
+  g_object_unref (stream);
+  g_free (channel_path);
+}
+
+static void
 tp_call_channel_stream_created (TfChannel *chan G_GNUC_UNUSED,
     TfStream *stream, EmpathyTpCall *call)
 {
@@ -760,30 +795,30 @@ tp_call_channel_stream_created (TfChannel *chan G_GNUC_UNUSED,
     }
   else if (media_type == TP_MEDIA_STREAM_TYPE_VIDEO)
     {
-      //TpStreamEngineVideoStream *videostream = NULL;
-      //GstPad *pad;
+      EmpathyTpVideoStream *videostream = NULL;
+      GstPad *pad;
 
-      //pad = gst_element_get_request_pad (self->priv->videotee, "src%d");
+      pad = gst_element_get_request_pad (priv->videotee, "src%d");
 
-      //videostream = tp_stream_engine_video_stream_new (stream,
-          //GST_BIN (self->priv->pipeline), pad, &error);
+      videostream = empathy_tp_video_stream_new (stream,
+          GST_BIN (priv->pipeline), pad, &error);
 
-      //if (!videostream)
-        //{
-          //g_warning ("Could not create video stream: %s", error->message);
-          //gst_element_release_request_pad (self->priv->videotee, pad);
-          //return;
-        //}
-      //g_clear_error (&error);
-      //g_object_set_data ((GObject*) stream, "se-stream", videostream);
+      if (!videostream)
+        {
+          g_warning ("Could not create video stream: %s", error->message);
+          gst_element_release_request_pad (priv->videotee, pad);
+          return;
+        }
+      g_clear_error (&error);
+      g_object_set_data ((GObject*) stream, "se-stream", videostream);
 
-      //g_mutex_lock (self->priv->mutex);
-      //self->priv->output_sinks = g_list_prepend (self->priv->output_sinks,
-          //videostream);
-      //g_mutex_unlock (self->priv->mutex);
+      g_mutex_lock (priv->mutex);
+      priv->output_sinks = g_list_prepend (priv->output_sinks,
+          videostream);
+      g_mutex_unlock (priv->mutex);
 
-      //g_signal_connect (videostream, "receiving",
-          //G_CALLBACK (stream_receiving), self);
+      g_signal_connect (videostream, "receiving",
+          G_CALLBACK (tp_call_stream_receiving), call);
     }
 
   //g_signal_connect (stream, "closed", G_CALLBACK (stream_closed), self);

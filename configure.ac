@@ -34,6 +34,7 @@ TELEPATHY_GLIB_REQUIRED=0.7.7
 MISSION_CONTROL_REQUIRED=4.61
 ENCHANT_REQUIRED=1.2.0
 ISO_CODES_REQUIRED=0.35
+GSTREAMER_REQUIRED=0.10.18
 
 # Uncomment that to build without deprecated symbols
 # AC_DEFINE(GTK_DISABLE_DEPRECATED, 1, [Disable deprecated GTK symbols])
@@ -87,7 +88,6 @@ PKG_CHECK_MODULES(LIBEMPATHY,
    libxml-2.0
    telepathy-glib >= $TELEPATHY_GLIB_REQUIRED
    libmissioncontrol >= $MISSION_CONTROL_REQUIRED
-   telepathy-farsight
 ])
 
 PKG_CHECK_MODULES(EMPATHY,
@@ -102,6 +102,8 @@ PKG_CHECK_MODULES(EMPATHY,
    x11
    libglade-2.0 >= $LIBGLADE_REQUIRED
    libebook-1.2
+   telepathy-farsight
+   gstreamer-interfaces-0.10 >= $GSTREAMER_REQUIRED
 ])
 
 # -----------------------------------------------------------
