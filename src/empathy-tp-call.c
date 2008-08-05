@@ -64,10 +64,16 @@ typedef struct
 
   GstElement *audiosink;
   GstElement *audioadder;
-  
+  GstElement *audiosrc;
+
   gint audio_sink_use_count;
+  gint audio_source_use_count;
+  gint video_source_use_count;
 
   GstElement *videotee;
+  GstElement *videosrc;
+
+  gboolean force_fakesrc;
 
   GList *output_sinks;
 
@@ -725,33 +731,183 @@ tp_call_audio_stream_release_pad (EmpathyTpAudioStream *audiostream,
 }
 
 static void
-tp_call_stream_receiving (EmpathyTpVideoStream *videostream,
+tp_call_stream_closed (TfStream *stream, EmpathyTpCall *call)
+{
+  EmpathyTpCallPriv *priv = GET_PRIV (call);
+  GObject *sestream = NULL;
+
+  sestream = g_object_get_data (G_OBJECT (stream), "se-stream");
+  if (sestream)
+    {
+      if (EMPATHY_TP_IS_VIDEO_STREAM (sestream))
+        {
+          EmpathyTpVideoStream *videostream =
+              (EmpathyTpVideoStream *) sestream;
+
+          g_mutex_lock (priv->mutex);
+          priv->output_sinks = g_list_remove (priv->output_sinks,
+              videostream);
+          g_mutex_unlock (priv->mutex);
+
+        }
+
+      if (EMPATHY_TP_IS_VIDEO_STREAM (sestream) ||
+          EMPATHY_TP_IS_AUDIO_STREAM (sestream))
+        {
+          GstPad *pad, *peer;
+
+          g_object_get (sestream, "pad", &pad, NULL);
+
+
+          /* Take the stream lock to make sure nothing is flowing through the
+           * pad
+           * We can only do that because we have no blocking elements before
+           * a queue in our pipeline after the pads.
+           */
+          peer = gst_pad_get_peer (pad);
+          GST_PAD_STREAM_LOCK(pad);
+          if (peer)
+            {
+              gst_pad_unlink (pad, peer);
+              gst_object_unref (peer);
+            }
+          /*
+           * Releasing request pads currently fail cause stuff like
+           * alloc_buffer() does take any lock and there is no way to prevent it
+           * ??? or something like that
+
+          if (TP_STREAM_ENGINE_IS_VIDEO_STREAM (sestream))
+            gst_element_release_request_pad (self->priv->videotee, pad);
+          else if (TP_STREAM_ENGINE_IS_AUDIO_STREAM (sestream))
+            gst_element_release_request_pad (self->priv->audiotee, pad);
+          */
+          GST_PAD_STREAM_UNLOCK(pad);
+
+          gst_object_unref (pad);
+        }
+      g_object_unref (sestream);
+    }
+}
+
+static void
+tp_call_start_video_source (EmpathyTpCall *call)
+{
+  EmpathyTpCallPriv *priv = GET_PRIV (call);
+  GstStateChangeReturn state_ret;
+
+
+  if (priv->force_fakesrc)
+    {
+      g_debug ("Don't have a video source, not starting it");
+      return;
+    }
+
+  g_debug ("Starting video source");
+
+  priv->video_source_use_count++;
+
+  state_ret = gst_element_set_state (priv->videosrc, GST_STATE_PLAYING);
+
+  if (state_ret == GST_STATE_CHANGE_FAILURE)
+    g_error ("Error starting the video source");
+}
+
+static void
+tp_call_start_audio_source (EmpathyTpCall *call)
+{
+  EmpathyTpCallPriv *priv = GET_PRIV (call);
+  GstStateChangeReturn state_ret;
+
+  g_debug ("Starting audio source");
+
+  priv->audio_source_use_count++;
+
+  state_ret = gst_element_set_state (priv->audiosrc, GST_STATE_PLAYING);
+
+  if (state_ret == GST_STATE_CHANGE_FAILURE)
+    g_error ("Error starting the audio source");
+}
+
+static gboolean
+tp_call_stream_request_resource (TfStream *stream,
+    TpMediaStreamDirection dir,
     EmpathyTpCall *call)
 {
-  TfStream *stream = NULL;
-  TfChannel *chan = NULL;
-  guint stream_id;
-  gchar *channel_path;
+  TpMediaStreamType media_type;
 
-  g_object_get (videostream,
-      "stream", &stream,
-      NULL);
+  if (!(dir & TP_MEDIA_STREAM_DIRECTION_SEND))
+    return TRUE;
+
+  g_object_get (stream, "media-type", &media_type, NULL);
+
+  if (media_type == TP_MEDIA_STREAM_TYPE_VIDEO)
+    tp_call_start_video_source (call);
+  else if (media_type == TP_MEDIA_STREAM_TYPE_AUDIO)
+    tp_call_start_audio_source (call);
+
+  return TRUE;
+}
+
+static void
+tp_call_stop_video_source (EmpathyTpCall *call)
+{
+  EmpathyTpCallPriv *priv = GET_PRIV (call);
+  GstStateChangeReturn state_ret;
+
+  priv->video_source_use_count--;
+
+  if (priv->video_source_use_count > 0)
+    return;
+
+  g_debug ("Stopping video source");
+
+  state_ret = gst_element_set_state (priv->videosrc, GST_STATE_NULL);
+
+  if (state_ret == GST_STATE_CHANGE_FAILURE)
+    g_error ("Error stopping the video source");
+  else if (state_ret == GST_STATE_CHANGE_ASYNC)
+    g_debug ("Stopping video src async??");
+}
+
+static void
+tp_call_stop_audio_source (EmpathyTpCall *call)
+{
+  EmpathyTpCallPriv *priv = GET_PRIV (call);
+  GstStateChangeReturn state_ret;
+
+  priv->audio_source_use_count--;
+
+  if (priv->audio_source_use_count > 0)
+    return;
+
+  g_debug ("Stopping audio source");
+
+  state_ret = gst_element_set_state (priv->audiosrc, GST_STATE_NULL);
+
+  if (state_ret == GST_STATE_CHANGE_FAILURE)
+    g_error ("Error stopping the audio source");
+  else if (state_ret == GST_STATE_CHANGE_ASYNC)
+    g_debug ("Stopping audio src async??");
+}
+
+static void
+tp_call_stream_free_resource (TfStream *stream,
+    TpMediaStreamDirection dir,
+    EmpathyTpCall *call)
+{
+  TpMediaStreamType media_type;
+
+  if (!(dir & TP_MEDIA_STREAM_DIRECTION_SEND))
+    return;
 
   g_object_get (stream,
-      "channel", &chan,
-      "stream-id", &stream_id,
+      "media-type", &media_type,
       NULL);
 
-  g_object_get (chan,
-      "object-path", &channel_path,
-      NULL);
-
-  //stream_engine_svc_stream_engine_emit_receiving (call,
-      //channel_path, stream_id, TRUE);
-
-  g_object_unref (chan);
-  g_object_unref (stream);
-  g_free (channel_path);
+  if (media_type == TP_MEDIA_STREAM_TYPE_VIDEO)
+    tp_call_stop_video_source (call);
+  else if (media_type == TP_MEDIA_STREAM_TYPE_AUDIO)
+    tp_call_stop_audio_source (call);
 }
 
 static void
@@ -816,17 +972,74 @@ tp_call_channel_stream_created (TfChannel *chan G_GNUC_UNUSED,
       priv->output_sinks = g_list_prepend (priv->output_sinks,
           videostream);
       g_mutex_unlock (priv->mutex);
+   }
 
-      g_signal_connect (videostream, "receiving",
-          G_CALLBACK (tp_call_stream_receiving), call);
+  g_signal_connect (stream,
+      "closed",
+      G_CALLBACK (tp_call_stream_closed),
+      call);
+
+  g_signal_connect (stream,
+      "request-resource",
+      G_CALLBACK (tp_call_stream_request_resource),
+      call);
+
+  g_signal_connect (stream,
+      "free-resource",
+      G_CALLBACK (tp_call_stream_free_resource),
+      call);
+}
+
+static GList *
+tp_call_stream_get_codec_config (TfChannel *chan,
+    guint stream_id,
+    TpMediaStreamType media_type,
+    TpMediaStreamDirection direction,
+    EmpathyTpCall *call)
+{
+  GList *codec_config = NULL;
+  gchar *filename;
+  gint i;
+  GError *error = NULL;
+  const gchar * const *system_config_dirs = g_get_system_config_dirs ();
+
+  filename = g_build_filename (g_get_user_config_dir (), "stream-engine",
+      "gstcodecs.conf", NULL);
+
+  codec_config = fs_codec_list_from_keyfile (filename, &error);
+
+  if (!codec_config)
+    {
+      g_debug ("Could not read local codecs config at %s: %s", filename,
+          error ? error->message : "");
+      g_free (filename);
+    }
+  g_clear_error (&error);
+
+  for (i = 0; system_config_dirs[i] && codec_config == NULL; i++)
+    {
+      filename = g_build_filename (system_config_dirs[i],
+          "stream-engine",
+          "gstcodecs.conf", NULL);
+
+      codec_config = fs_codec_list_from_keyfile (filename, &error);
+
+      if (!codec_config)
+        {
+          g_debug ("Could not read global codecs config at %s: %s", filename,
+              error ? error->message : "");
+          g_free (filename);
+        }
+      g_clear_error (&error);
     }
 
-  //g_signal_connect (stream, "closed", G_CALLBACK (stream_closed), self);
+  if (codec_config)
+    {
+      g_debug ("Loaded codec config from %s", filename);
+      g_free (filename);
+    }
 
-  //g_signal_connect (stream, "request-resource",
-      //G_CALLBACK (stream_request_resource), self);
-  //g_signal_connect (stream, "free-resource",
-      //G_CALLBACK (stream_free_resource), self);
+  return codec_config;
 }
 
 static void
@@ -889,10 +1102,10 @@ tp_call_stream_engine_handle_channel (EmpathyTpCall *call)
       "stream-created",
       G_CALLBACK (tp_call_channel_stream_created),
       call);
-  //g_signal_connect (chan, "stream-get-codec-config",
-      //G_CALLBACK (stream_get_codec_config), self);
-
-  //g_signal_emit (self, signals[HANDLING_CHANNEL], 0);
+  g_signal_connect (priv->channel,
+      "stream-get-codec-config",
+      G_CALLBACK (tp_call_stream_get_codec_config),
+      call);
   //-------------------------------------------------------------------
 
   g_object_unref (connection);
@@ -1221,12 +1434,12 @@ empathy_tp_call_add_output_video (EmpathyTpCall *call,
       "channel", &chan,
       NULL);
 
-  emp_cli_stream_engine_call_set_output_window (priv->stream_engine, -1,
-      TP_PROXY (chan)->object_path,
-      priv->video->id, output_video_socket_id,
-      tp_call_async_cb,
-      "setting output window", NULL,
-      G_OBJECT (call));
+  //emp_cli_stream_engine_call_set_output_window (priv->stream_engine, -1,
+      //TP_PROXY (chan)->object_path,
+      //priv->video->id, output_video_socket_id,
+      //tp_call_async_cb,
+      //"setting output window", NULL,
+      //G_OBJECT (call));
 }
 
 void
@@ -1234,23 +1447,43 @@ empathy_tp_call_set_output_volume (EmpathyTpCall *call,
                                    guint volume)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
-  TpChannel *chan;
 
   g_return_if_fail (EMPATHY_IS_TP_CALL (call));
   g_return_if_fail (priv->status != EMPATHY_TP_CALL_STATUS_CLOSED);
 
   DEBUG ("Setting output volume: %d", volume);
 
-  g_object_get (priv->channel,
-      "channel", &chan,
-      NULL);
+  //-------------------------------------------------------------------
+  TfStream *stream;
+  GError *error = NULL;
+  TpMediaStreamType media_type;
+  EmpathyTpAudioStream *audiostream;
+  gdouble doublevolume = volume / 100.0;
 
-  emp_cli_stream_engine_call_set_output_volume (priv->stream_engine, -1,
-      TP_PROXY (chan)->object_path,
-      priv->audio->id, volume,
-      tp_call_async_cb,
-      "setting output volume", NULL,
-      G_OBJECT (call));
+  stream = tf_channel_lookup_stream (priv->channel, priv->audio->id);
+  
+  if (stream == NULL)
+    {
+      error = g_error_new (TP_ERRORS, TP_ERROR_INVALID_ARGUMENT,
+          "Stream does not exist");
+      g_error_free (error);
+      return;
+    }
+
+  g_object_get (stream, "media-type", &media_type, NULL);
+
+  if (media_type != TP_MEDIA_STREAM_TYPE_AUDIO)
+    {
+      error = g_error_new (TP_ERRORS, TP_ERROR_INVALID_ARGUMENT,
+          "MuteOutput can only be called on audio streams");
+      g_error_free (error);
+      return;
+    }
+
+  audiostream = g_object_get_data ((GObject*) stream, "se-stream");
+
+  g_object_set (audiostream, "output-volume", doublevolume, NULL);
+  //-------------------------------------------------------------------
 }
 
 void
@@ -1258,22 +1491,41 @@ empathy_tp_call_mute_output (EmpathyTpCall *call,
                              gboolean is_muted)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
-  TpChannel *chan;
 
   g_return_if_fail (EMPATHY_IS_TP_CALL (call));
 
   DEBUG ("Setting output mute: %d", is_muted);
 
-  g_object_get (priv->channel,
-      "channel", &chan,
-      NULL);
+  //-------------------------------------------------------------------
+  TfStream *stream;
+  GError *error = NULL;
+  TpMediaStreamType media_type;
+  EmpathyTpAudioStream *audiostream;
 
-  emp_cli_stream_engine_call_mute_output (priv->stream_engine, -1,
-      TP_PROXY (chan)->object_path,
-      priv->audio->id, is_muted,
-      tp_call_async_cb,
-      "muting output", NULL,
-      G_OBJECT (call));
+  stream = tf_channel_lookup_stream (priv->channel, priv->audio->id);
+
+  if (stream == NULL)
+    {
+      error = g_error_new (TP_ERRORS, TP_ERROR_INVALID_ARGUMENT,
+          "Stream does not exist");
+      g_error_free (error);
+      return;
+    }
+
+  g_object_get (stream, "media-type", &media_type, NULL);
+
+  if (media_type != TP_MEDIA_STREAM_TYPE_AUDIO)
+    {
+      error = g_error_new (TP_ERRORS, TP_ERROR_INVALID_ARGUMENT,
+          "MuteOutput can only be called on audio streams");
+      g_error_free (error);
+      return;
+    }
+
+  audiostream = g_object_get_data ((GObject*) stream, "se-stream");
+
+  g_object_set (audiostream, "output-mute", is_muted, NULL);
+  //-------------------------------------------------------------------
 }
 
 void
@@ -1281,22 +1533,42 @@ empathy_tp_call_mute_input (EmpathyTpCall *call,
                             gboolean is_muted)
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
-  TpChannel *chan;
 
   g_return_if_fail (EMPATHY_IS_TP_CALL (call));
 
   DEBUG ("Setting input mute: %d", is_muted);
 
-  g_object_get (priv->channel,
-      "channel", &chan,
-      NULL);
+  //-------------------------------------------------------------------
+  TfStream *stream;
+  GError *error = NULL;
+  TpMediaStreamType media_type;
+  EmpathyTpAudioStream *audiostream;
 
-  emp_cli_stream_engine_call_mute_input (priv->stream_engine, -1,
-      TP_PROXY (chan)->object_path,
-      priv->audio->id, is_muted,
-      tp_call_async_cb,
-      "muting input", NULL,
-      G_OBJECT (call));
+  stream = tf_channel_lookup_stream (priv->channel, priv->audio->id);
+
+  if (stream == NULL)
+    {
+      error = g_error_new (TP_ERRORS, TP_ERROR_INVALID_ARGUMENT,
+          "Stream does not exist");
+      g_error_free (error);
+      return;
+    }
+
+  g_object_get (stream, "media-type", &media_type, NULL);
+
+  if (media_type != TP_MEDIA_STREAM_TYPE_AUDIO)
+    {
+      error = g_error_new (TP_ERRORS, TP_ERROR_INVALID_ARGUMENT,
+          "MuteInput can only be called on audio streams");
+      g_error_free (error);
+      return;
+    }
+
+  audiostream = g_object_get_data ((GObject*) stream, "se-stream");
+
+  g_object_set (audiostream, "input-mute", is_muted, NULL);
+
+  //-------------------------------------------------------------------
 }
 
 void
