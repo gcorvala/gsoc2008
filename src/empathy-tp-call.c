@@ -9,7 +9,7 @@
  * version 2.1 of the License, or (at your option) any later version.
  *
  * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * but WITHOUT ANY WARRANTY; without even the implied w//arranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * Lesser General Public License for more details.
  *
@@ -39,7 +39,7 @@
 #include "empathy-tp-audio-stream.h"
 #include "empathy-tp-video-stream.h"
 
-#define DEBUG_FLAG EMPATHY_DEBUG_TP
+#define DEBUG_FLAG EMPATHY_DEBUG_CALL
 #include <libempathy/empathy-debug.h>
 
 #define STREAM_ENGINE_BUS_NAME "org.freedesktop.Telepathy.StreamEngine"
@@ -438,6 +438,7 @@ tp_call_handler_result (TfChannel *chan G_GNUC_UNUSED,
                 GError *error,
                 EmpathyTpCall *call)
 {
+  g_debug ("HandlerResult called");
   if (error)
       DEBUG ("Error handler_result: %s", error->message);
 }
@@ -454,8 +455,6 @@ tp_call_channel_closed (TfChannel *chan, EmpathyTpCall *call)
   g_object_unref (chan);
 
   g_free (object_path);
-
-  //check_if_busy (self);
 }
 
 static void
@@ -481,7 +480,7 @@ tp_call_channel_session_created (TfChannel *chan G_GNUC_UNUSED,
 {
   EmpathyTpCallPriv *priv = GET_PRIV (call);
   
-  g_debug ("session-created cb");
+  g_debug ("SessionCreated called");
   
   g_object_set (conference, "latency", 100, NULL);
 
@@ -917,6 +916,8 @@ tp_call_channel_stream_created (TfChannel *chan G_GNUC_UNUSED,
   guint media_type;
   GError *error = NULL;
   EmpathyTpCallPriv *priv = GET_PRIV (call);
+
+  g_debug ("StreamCreated called");
 
   g_object_get (G_OBJECT (stream), "media-type", &media_type, NULL);
 
@@ -1395,6 +1396,49 @@ empathy_tp_call_add_preview_video (EmpathyTpCall *call,
 
   DEBUG ("Adding preview video");
 
+  //-------------------------------------------------------------------
+  ////GError *error = NULL;
+  //GstPad *pad;
+  ////TpStreamEngineVideoPreview *preview;
+  ////guint window_id;
+
+  //if (priv->force_fakesrc)
+    //{
+      //GError *error = g_error_new (TP_ERRORS, TP_ERROR_NOT_AVAILABLE,
+          //"Could not get a video source");
+      //g_debug ("%s", error->message);
+
+      //g_error_free (error);
+      //return;
+    //}
+
+  ////preview = tp_stream_engine_video_preview_new (GST_BIN (self->priv->pipeline),
+      ////&error);
+
+  ////if (!preview)
+    ////{
+      ////g_clear_error (&error);
+      ////return;
+    ////}
+
+  //g_mutex_lock (priv->mutex);
+  ////self->priv->preview_sinks = g_list_prepend (self->priv->preview_sinks,
+      ////preview);
+  //g_mutex_unlock (priv->mutex);
+
+  //pad = gst_element_get_request_pad (priv->videotee, "src%d");
+
+  ////g_object_set (preview, "pad", pad, NULL);
+
+  ////g_signal_connect (preview, "plug-deleted",
+      ////G_CALLBACK (_preview_window_plug_deleted), self);
+
+  ////g_object_get (preview, "window-id", &window_id, NULL);
+
+  //tp_call_start_video_source (call);
+
+  ////g_signal_emit (self, signals[HANDLING_CHANNEL], 0);
+  //-------------------------------------------------------------------
   //emp_cli_stream_engine_call_add_preview_window (priv->stream_engine, -1,
       //preview_video_socket_id,
       //tp_call_async_cb,
@@ -1433,7 +1477,47 @@ empathy_tp_call_add_output_video (EmpathyTpCall *call,
   g_object_get (priv->channel,
       "channel", &chan,
       NULL);
+  //-------------------------------------------------------------------
+  TfStream *stream;
+  TpMediaStreamType media_type;
+  GError *error = NULL;
 
+  g_debug ("%s: channel_path=%s, stream_id=%u", G_STRFUNC, TP_PROXY (chan)->object_path,
+      priv->video->id);
+
+  stream = tf_channel_lookup_stream (priv->channel, priv->audio->id);
+
+  if (stream == NULL)
+    {
+      error = g_error_new (TP_ERRORS, TP_ERROR_INVALID_ARGUMENT,
+          "Stream does not exist");
+      g_error_free (error);
+      return;
+    }
+
+  g_object_get (stream, "media-type", &media_type, NULL);
+
+  if (media_type != TP_MEDIA_STREAM_TYPE_VIDEO)
+    {
+      error = g_error_new (TP_ERRORS, TP_ERROR_INVALID_ARGUMENT,
+          "GetOutputWindow can only be called on video streams");
+      g_error_free (error);
+      return;
+    }
+
+  if (stream)
+    {
+      guint window_id;
+      EmpathyTpVideoSink *videosink;
+
+      videosink = EMPATHY_TP_VIDEO_SINK (
+          g_object_get_data ((GObject*) stream, "se-stream"));
+
+      g_object_get (videosink, "window-id", &window_id, NULL);
+
+      g_debug ("Returning window id %u", window_id);
+    }
+  //-------------------------------------------------------------------
   //emp_cli_stream_engine_call_set_output_window (priv->stream_engine, -1,
       //TP_PROXY (chan)->object_path,
       //priv->video->id, output_video_socket_id,
