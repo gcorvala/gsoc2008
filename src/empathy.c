@@ -50,6 +50,8 @@
 #include "empathy-chat-window.h"
 #include "bacon-message-connection.h"
 
+#include <gst/gst.h>
+
 #define DEBUG_FLAG EMPATHY_DEBUG_OTHER
 #include <libempathy/empathy-debug.h>
 
@@ -382,6 +384,11 @@ main (int argc, char *argv[])
 				 _("- Empathy Instant Messenger"),
 				 options, GETTEXT_PACKAGE, &error)) {
 		g_warning ("Error in gtk init: %s", error->message);
+		return EXIT_FAILURE;
+	}
+	
+	if (!gst_init_check (&argc, &argv, &error)) {
+		g_warning ("Error in gst init: %s", error->message);
 		return EXIT_FAILURE;
 	}
 

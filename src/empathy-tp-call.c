@@ -35,9 +35,13 @@
 #include <libempathy/empathy-tp-group.h>
 #include <libempathy/empathy-utils.h>
 
+#include <gst/farsight/fs-element-added-notifier.h>
+
 #include "empathy-tp-call.h"
 #include "empathy-tp-audio-stream.h"
 #include "empathy-tp-video-stream.h"
+#include "empathy-tp-video-preview.h"
+#include "empathy-tp-util.h"
 
 #define DEBUG_FLAG EMPATHY_DEBUG_CALL
 #include <libempathy/empathy-debug.h>
@@ -76,6 +80,11 @@ typedef struct
   gboolean force_fakesrc;
 
   GList *output_sinks;
+  GList *preview_sinks;
+
+  FsElementAddedNotifier *notifier;
+  
+  guint bus_async_source_id;
 
   EmpathyTpCallStream *audio;
   EmpathyTpCallStream *video;
@@ -440,7 +449,11 @@ tp_call_handler_result (TfChannel *chan G_GNUC_UNUSED,
 {
   g_debug ("HandlerResult called");
   if (error)
-      DEBUG ("Error handler_result: %s", error->message);
+    {
+      DEBUG ("Error handler_result domain: %s", g_quark_to_string(error->domain));
+      DEBUG ("Error handler_result code: %d", error->code);
+      DEBUG ("Error handler_result message: %s", error->message);
+    }
 }
 
 static void
@@ -1305,6 +1318,517 @@ empathy_tp_call_class_init (EmpathyTpCallClass *klass)
 }
 
 static void
+_build_base_video_elements (EmpathyTpCall *call)
+{
+  EmpathyTpCallPriv *priv = GET_PRIV (call);
+  GstElement *videosrc = NULL;
+  GstElement *tee;
+  GstElement *capsfilter;
+#ifndef MAEMO_OSSO_SUPPORT
+  GstElement *tmp;
+#endif
+  const gchar *elem;
+  const gchar *caps_str;
+  gboolean ret;
+  GstElement *fakesink;
+  GstCaps *filter = NULL;
+  GstStateChangeReturn state_ret;
+
+ try_again:
+
+  if ((elem = getenv ("FS_VIDEO_SRC")) || (elem = getenv ("FS_VIDEOSRC")))
+    {
+      if (priv->force_fakesrc)
+        g_error ("Invalid video source passed in FS_VIDEOSRC");
+      g_debug ("making video src with pipeline \"%s\"", elem);
+      videosrc = gst_parse_bin_from_description (elem, TRUE, NULL);
+      g_assert (videosrc);
+      gst_element_set_name (videosrc, "videosrc");
+    }
+  else
+    {
+#ifdef MAEMO_OSSO_SUPPORT
+      videosrc = gst_element_factory_make ("gconfv4l2src", NULL);
+      if (!videosrc)
+        g_error ("Could make video source");
+#else
+      if (priv->force_fakesrc)
+        {
+          videosrc = gst_element_factory_make ("fakesrc", NULL);
+          g_object_set (videosrc, "is-live", TRUE, NULL);
+        }
+
+      if (videosrc == NULL)
+        videosrc = gst_element_factory_make ("gconfvideosrc", NULL);
+
+      if (videosrc == NULL)
+        videosrc = gst_element_factory_make ("v4l2src", NULL);
+
+      if (videosrc == NULL)
+        videosrc = gst_element_factory_make ("v4lsrc", NULL);
+
+      if (videosrc != NULL)
+        {
+          g_debug ("using %s as video source", GST_ELEMENT_NAME (videosrc));
+        }
+      else
+        {
+          videosrc = gst_element_factory_make ("videotestsrc", NULL);
+          if (videosrc == NULL)
+            g_error ("failed to create any video source aaa");
+          g_object_set (videosrc, "is-live", TRUE, NULL);
+        }
+#endif
+    }
+
+  if ((caps_str = getenv ("FS_VIDEO_SRC_CAPS")) || (caps_str = getenv ("FS_VIDEOSRC_CAPS")))
+    {
+      filter = gst_caps_from_string (caps_str);
+    }
+
+  if (!filter)
+    {
+      filter = gst_caps_new_simple ("video/x-raw-yuv",
+#ifdef MAEMO_OSSO_SUPPORT
+          "width", G_TYPE_INT, 176,
+          "height", G_TYPE_INT, 144,
+#else
+          "width", G_TYPE_INT, 352,
+          "height", G_TYPE_INT, 288,
+          "format", GST_TYPE_FOURCC, GST_MAKE_FOURCC ('I', '4', '2', '0'),
+#endif
+          NULL);
+    }
+  else
+    {
+      g_debug ("applying custom caps '%s' on the video source\n", caps_str);
+    }
+
+  fakesink = gst_element_factory_make ("fakesink", NULL);
+
+  gst_bin_add_many (GST_BIN (priv->pipeline), videosrc, fakesink, NULL);
+
+  if (!gst_element_link (videosrc, fakesink))
+    g_error ("Could not link fakesink to videosrc");
+
+  state_ret = gst_element_set_state (priv->pipeline, GST_STATE_PLAYING);
+  if (state_ret == GST_STATE_CHANGE_FAILURE)
+    {
+      if (priv->force_fakesrc)
+        {
+          g_error ("Could not even start fakesrc");
+        }
+      else
+        {
+          g_debug ("Video source failed, falling back to fakesrc");
+          state_ret = gst_element_set_state (priv->pipeline, GST_STATE_NULL);
+          g_assert (state_ret == GST_STATE_CHANGE_SUCCESS);
+          if (!gst_bin_remove (GST_BIN (priv->pipeline), fakesink))
+            g_error ("Could not remove fakesink");
+
+          priv->force_fakesrc = TRUE;
+          gst_bin_remove (GST_BIN (priv->pipeline), videosrc);
+          goto try_again;
+        }
+    }
+  else
+    {
+      state_ret = gst_element_set_state (priv->pipeline, GST_STATE_NULL);
+      g_assert (state_ret == GST_STATE_CHANGE_SUCCESS);
+      gst_bin_remove (GST_BIN (priv->pipeline), fakesink);
+    }
+
+  gst_element_set_locked_state (videosrc, TRUE);
+
+  tee = gst_element_factory_make ("tee", "videotee");
+  g_assert (tee);
+  if (!gst_bin_add (GST_BIN (priv->pipeline), tee))
+    g_error ("Could not add tee to pipeline");
+
+  priv->videosrc = videosrc;
+  priv->videotee = tee;
+
+#ifndef MAEMO_OSSO_SUPPORT
+#if 0
+  /* <wtay> Tester_, yes, videorate does not play nice with live pipelines */
+  tmp = gst_element_factory_make ("videorate", NULL);
+  if (tmp != NULL)
+    {
+      g_debug ("linking videorate");
+      gst_bin_add (GST_BIN (priv->pipeline), tmp);
+      gst_element_link (videosrc, tmp);
+      videosrc = tmp;
+    }
+#endif
+
+  tmp = gst_element_factory_make ("ffmpegcolorspace", NULL);
+  if (tmp != NULL)
+    {
+      g_debug ("linking ffmpegcolorspace");
+      gst_bin_add (GST_BIN (priv->pipeline), tmp);
+      gst_element_link (videosrc, tmp);
+      videosrc = tmp;
+    }
+
+  tmp = gst_element_factory_make ("videoscale", NULL);
+  if (tmp != NULL)
+    {
+      g_debug ("linking videoscale");
+      gst_bin_add (GST_BIN (priv->pipeline), tmp);
+      gst_element_link (videosrc, tmp);
+      videosrc = tmp;
+    }
+#endif
+
+  capsfilter = gst_element_factory_make ("capsfilter", NULL);
+  g_assert (capsfilter);
+  ret = gst_bin_add (GST_BIN (priv->pipeline), capsfilter);
+  g_assert (ret);
+
+  g_object_set (capsfilter, "caps", filter, NULL);
+  gst_caps_unref (filter);
+
+  ret = gst_element_link (videosrc, capsfilter);
+  g_assert (ret);
+  ret = gst_element_link (capsfilter, tee);
+  g_assert (ret);
+}
+
+static GstElement *
+_make_audio_src (void)
+{
+  const gchar *elem;
+  GstElement *bin = NULL;
+  GstElement *audioconvert = NULL;
+  GstElement *src = NULL;
+  GstPad *pad;
+
+  bin = gst_bin_new ("audiosrcbin");
+
+  if ((elem = getenv ("FS_AUDIO_SRC")) || (elem = getenv ("FS_AUDIOSRC")))
+    {
+      g_debug ("making audio src with pipeline \"%s\"", elem);
+      src = gst_parse_bin_from_description (elem, TRUE, NULL);
+      g_assert (src);
+    }
+  else
+    {
+#ifdef MAEMO_OSSO_SUPPORT
+      src = gst_element_factory_make ("dsppcmsrc", NULL);
+#else
+      src = gst_element_factory_make ("gconfaudiosrc", NULL);
+
+      if (src == NULL)
+        src = gst_element_factory_make ("alsasrc", NULL);
+#endif
+    }
+
+  if (src == NULL)
+    {
+      g_debug ("failed to make audio src element!");
+      return NULL;
+    }
+
+  g_debug ("made audio src element %s", GST_ELEMENT_NAME (src));
+
+  audioconvert = gst_element_factory_make ("audioconvert", NULL);
+
+
+  if (!gst_bin_add (GST_BIN (bin), audioconvert) ||
+      !gst_bin_add (GST_BIN (bin), src))
+    {
+      gst_object_unref (bin);
+      gst_object_unref (src);
+      gst_object_unref (audioconvert);
+
+      g_warning ("Could not add audioconvert or src to the bin");
+
+      return NULL;
+    }
+
+  if (!gst_element_link_pads (src, "src", audioconvert, "sink"))
+    {
+      gst_object_unref (bin);
+      g_warning ("Could not link src and audioconvert elements");
+      return NULL;
+    }
+
+  pad = gst_bin_find_unconnected_pad (GST_BIN (bin), GST_PAD_SRC);
+
+  if (!pad)
+    {
+      gst_object_unref (bin);
+      g_warning ("Could not find unconnected sink pad in src bin");
+      return NULL;
+    }
+
+  if (!gst_element_add_pad (bin, gst_ghost_pad_new ("src", pad)))
+    {
+      gst_object_unref (bin);
+      g_warning ("Could not add pad to bin");
+      return NULL;
+    }
+
+  gst_object_unref (pad);
+
+  return bin;
+
+}
+
+static void
+_build_base_audio_elements (EmpathyTpCall *call)
+{
+  EmpathyTpCallPriv *priv = GET_PRIV (call);
+  GstElement *src = NULL;
+  GstElement *tee = NULL;
+
+  src = _make_audio_src ();
+
+  if (!src)
+    {
+      g_warning ("Could not make audio src");
+      return;
+    }
+
+  if (!gst_bin_add (GST_BIN (priv->pipeline), src))
+    {
+      g_warning ("Could not add audiosrc to pipeline");
+      gst_object_unref (src);
+      return;
+    }
+
+  gst_element_set_locked_state (src, TRUE);
+
+  tee = gst_element_factory_make ("tee", "audiotee");
+
+  if (!gst_bin_add (GST_BIN (priv->pipeline), tee))
+    {
+      g_warning ("Could not add audiosrc to pipeline");
+      gst_object_unref (tee);
+      return;
+    }
+
+  if (!gst_element_link_pads (src, "src", tee, "sink"))
+    {
+      g_warning ("Could not link audio src and tee");
+      return;
+    }
+
+
+  priv->audiosrc = src;
+  priv->audiotee = tee;
+}
+
+static GstBusSyncReply
+tp_call_bus_sync_handler (GstBus *bus G_GNUC_UNUSED,
+    GstMessage *message,
+    gpointer data)
+{
+  EmpathyTpCallPriv *priv = GET_PRIV (data);
+  GList *item;
+  gboolean handled = FALSE;
+
+  if (GST_MESSAGE_TYPE (message) != GST_MESSAGE_ELEMENT)
+    return GST_BUS_PASS;
+
+  if (!gst_structure_has_name (message->structure, "prepare-xwindow-id"))
+    return GST_BUS_PASS;
+
+
+  g_mutex_lock (priv->mutex);
+  for (item = g_list_first (priv->preview_sinks);
+       item && !handled;
+       item = g_list_next (item))
+    {
+      EmpathyTpVideoSink *preview = item->data;
+
+      handled = empathy_tp_video_sink_bus_sync_message (preview, message);
+      if (handled)
+        break;
+    }
+
+  if (!handled)
+    {
+      for (item = g_list_first (priv->output_sinks);
+           item && !handled;
+           item = g_list_next (item))
+        {
+          EmpathyTpVideoSink *output = item->data;
+
+          handled = empathy_tp_video_sink_bus_sync_message (output,
+              message);
+          if (handled)
+            break;
+        }
+    }
+  g_mutex_unlock (priv->mutex);
+
+  if (handled)
+    {
+      gst_message_unref (message);
+      return GST_BUS_DROP;
+    }
+  else
+    return GST_BUS_PASS;
+}
+
+static gboolean
+tp_call_bus_async_handler (GstBus *bus G_GNUC_UNUSED,
+                   GstMessage *message,
+                   gpointer data)
+{
+  EmpathyTpCallPriv *priv = GET_PRIV (data);
+  GError *error = NULL;
+  gchar *error_string;
+  GstElement *source = GST_ELEMENT (GST_MESSAGE_SRC (message));
+  gchar *name = gst_element_get_name (source);
+
+
+  //for (i = 0; i < priv->channels->len; i++)
+    //if (tf_channel_bus_message (
+            //g_ptr_array_index (priv->channels, i), message))
+      //return TRUE;
+  if (tf_channel_bus_message (priv->channel, message))
+    return TRUE;
+
+  switch (GST_MESSAGE_TYPE (message))
+    {
+      case GST_MESSAGE_ERROR:
+        gst_message_parse_error (message, &error, &error_string);
+
+        g_debug ("%s: got error from %s: %s: %s (%d %d), stopping pipeline",
+            G_STRFUNC, name, error->message, error_string,
+            error->domain, error->code);
+
+        //close_all_streams (engine, error->message);
+
+        gst_element_set_state (priv->pipeline, GST_STATE_NULL);
+        gst_element_set_state (priv->videosrc, GST_STATE_NULL);
+        gst_element_set_state (priv->pipeline, GST_STATE_PLAYING);
+
+        g_free (error_string);
+        g_error_free (error);
+        break;
+      case GST_MESSAGE_WARNING:
+        {
+          gchar *debug_msg = NULL;
+          gst_message_parse_warning (message, &error, &debug_msg);
+          g_warning ("%s: got warning: %s (%s)", G_STRFUNC, error->message,
+              debug_msg);
+          g_free (debug_msg);
+          g_error_free (error);
+          break;
+        }
+
+      default:
+        break;
+    }
+
+  g_free (name);
+  return TRUE;
+}
+
+static void
+_create_pipeline (EmpathyTpCall *call)
+{
+  EmpathyTpCallPriv *priv = GET_PRIV (call);
+  GstBus *bus;
+  GstStateChangeReturn state_ret;
+
+  priv->pipeline = gst_pipeline_new (NULL);
+
+  fs_element_added_notifier_add (priv->notifier, GST_BIN (priv->pipeline));
+
+  _build_base_video_elements (call);
+  _build_base_audio_elements (call);
+
+
+  /* connect a callback to the stream bus so that we can set X window IDs
+   * at the right time, and detect when sinks have gone away */
+  bus = gst_element_get_bus (priv->pipeline);
+  gst_bus_set_sync_handler (bus, tp_call_bus_sync_handler, call);
+  priv->bus_async_source_id =
+    gst_bus_add_watch (bus, tp_call_bus_async_handler, call);
+  gst_object_unref (bus);
+
+  state_ret = gst_element_set_state (priv->pipeline, GST_STATE_PLAYING);
+  g_assert (state_ret != GST_STATE_CHANGE_FAILURE);
+}
+
+static void
+tp_call_set_element_props (FsElementAddedNotifier *notifier,
+    GstBin *bin,
+    GstElement *element,
+    EmpathyTpCall *call)
+{
+  if (g_object_has_property ((GObject *) element, "min-ptime"))
+    g_object_set ((GObject *) element, "min-ptime", GST_MSECOND * 20, NULL);
+
+  if (g_object_has_property ((GObject *) element, "max-ptime"))
+    g_object_set ((GObject *) element, "max-ptime", GST_MSECOND * 50, NULL);
+}
+
+static void
+tp_call_add_gstelements_conf_to_notifier (FsElementAddedNotifier *notifier)
+{
+  GKeyFile *keyfile = NULL;
+  gchar *filename;
+  gboolean loaded = FALSE;
+  GError *error = NULL;
+
+  keyfile = g_key_file_new ();
+
+  filename = g_build_filename (g_get_user_config_dir (), "stream-engine",
+      "gstelements.conf", NULL);
+
+  if (!g_key_file_load_from_file (keyfile, filename, G_KEY_FILE_NONE, &error))
+    {
+      g_debug ("Could not read element properties config at %s: %s", filename,
+          error ? error->message : "");
+    }
+  else
+    {
+      loaded = TRUE;
+    }
+  g_free (filename);
+  g_clear_error (&error);
+
+  if (!loaded)
+    {
+      gchar *path = NULL;
+      filename = g_build_filename ("stream-engine", "gstelements.conf", NULL);
+
+      if (!g_key_file_load_from_dirs (keyfile, filename,
+              (const char **) g_get_system_config_dirs (),
+              &path, G_KEY_FILE_NONE, &error))
+        {
+          g_debug ("Could not read element properties config file %s from any"
+              "of the XDG system config directories: %s", filename,
+              error ? error->message : "");
+        }
+      else
+        {
+          g_debug ("Loaded element properties from %s", path);
+          g_free (path);
+          loaded = TRUE;
+        }
+      g_free (filename);
+    }
+
+  g_clear_error (&error);
+
+  if (loaded)
+    {
+      fs_element_added_notifier_set_properties_from_keyfile (notifier,
+          keyfile);
+    }
+  else
+    {
+      g_key_file_free (keyfile);
+    }
+}
+
+static void
 empathy_tp_call_init (EmpathyTpCall *call)
 {
   EmpathyTpCallPriv *priv = G_TYPE_INSTANCE_GET_PRIVATE (call,
@@ -1318,6 +1842,16 @@ empathy_tp_call_init (EmpathyTpCall *call)
   priv->video = g_slice_new0 (EmpathyTpCallStream);
   priv->audio->exists = FALSE;
   priv->video->exists = FALSE;
+
+
+  priv->mutex = g_mutex_new ();
+
+  priv->notifier = fs_element_added_notifier_new ();
+  g_signal_connect (priv->notifier, "element-added",
+      G_CALLBACK (tp_call_set_element_props), call);
+  tp_call_add_gstelements_conf_to_notifier (priv->notifier);
+  
+  _create_pipeline (call);
 }
 
 EmpathyTpCall *
@@ -1390,54 +1924,56 @@ void
 empathy_tp_call_add_preview_video (EmpathyTpCall *call,
                                    guint preview_video_socket_id)
 {
-  //EmpathyTpCallPriv *priv = GET_PRIV (call);
+  EmpathyTpCallPriv *priv = GET_PRIV (call);
 
   g_return_if_fail (EMPATHY_IS_TP_CALL (call));
 
   DEBUG ("Adding preview video");
 
   //-------------------------------------------------------------------
-  ////GError *error = NULL;
+  GError *error = NULL;
   //GstPad *pad;
-  ////TpStreamEngineVideoPreview *preview;
-  ////guint window_id;
+  EmpathyTpVideoPreview *preview;
+  //guint window_id;
 
-  //if (priv->force_fakesrc)
-    //{
-      //GError *error = g_error_new (TP_ERRORS, TP_ERROR_NOT_AVAILABLE,
-          //"Could not get a video source");
-      //g_debug ("%s", error->message);
+  if (priv->force_fakesrc)
+    {
+      GError *error = g_error_new (TP_ERRORS, TP_ERROR_NOT_AVAILABLE,
+          "Could not get a video source");
+      g_debug ("%s", error->message);
 
-      //g_error_free (error);
-      //return;
-    //}
+      g_error_free (error);
+      return;
+    }
 
-  ////preview = tp_stream_engine_video_preview_new (GST_BIN (self->priv->pipeline),
-      ////&error);
+  preview = empathy_tp_video_preview_new (GST_BIN (priv->pipeline),
+      &error);
 
-  ////if (!preview)
-    ////{
-      ////g_clear_error (&error);
-      ////return;
-    ////}
+  if (!preview)
+    {
+      g_warning ("Could not create video preview: %s", error->message);
+      g_clear_error (&error);
+      return;
+    }
 
+  g_debug ("We are Here");
   //g_mutex_lock (priv->mutex);
-  ////self->priv->preview_sinks = g_list_prepend (self->priv->preview_sinks,
-      ////preview);
+  //priv->preview_sinks = g_list_prepend (priv->preview_sinks,
+      //preview);
   //g_mutex_unlock (priv->mutex);
 
   //pad = gst_element_get_request_pad (priv->videotee, "src%d");
 
-  ////g_object_set (preview, "pad", pad, NULL);
+  //g_object_set (preview, "pad", pad, NULL);
 
   ////g_signal_connect (preview, "plug-deleted",
       ////G_CALLBACK (_preview_window_plug_deleted), self);
 
-  ////g_object_get (preview, "window-id", &window_id, NULL);
+  //g_object_get (preview, "window-id", &window_id, NULL);
 
   //tp_call_start_video_source (call);
 
-  ////g_signal_emit (self, signals[HANDLING_CHANNEL], 0);
+  //g_signal_emit (self, signals[HANDLING_CHANNEL], 0);
   //-------------------------------------------------------------------
   //emp_cli_stream_engine_call_add_preview_window (priv->stream_engine, -1,
       //preview_video_socket_id,
